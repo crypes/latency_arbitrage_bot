@@ -1,54 +1,27 @@
 defmodule LatencyArbitrageBot.Support.Telemetry do
-  @moduledoc "Lightweight in-process telemetry — emits events for edge, latency, P&L."
+  @moduledoc "Lightweight in-process telemetry events."
   use GenServer, restart: :permanent
-
   defstruct [:metrics]
-
   def start_link(_), do: GenServer.start_link(__MODULE__, [], name: __MODULE__)
-
-  # ─── Emit macros (called from anywhere) ────────────────────────────────────
-
-  defmacro emit(event, measurements, metadata \\ quote do %{} end) do
-    quote do
-      :telemetry.execute(
-        [__MODULE__, unquote(event)],
-        unquote(measurements),
-        unquote(metadata)
-      )
-    end
-  end
-
-  # Convenience wrappers
-  def emit_edge(symbol, edge_pct, latency_ms) do
-    :telemetry.execute([:latency_arbitrage_bot, :edge, :evaluated],
-      %{edge_pct: edge_pct, latency_ms: latency_ms},
-      %{symbol: symbol}
-    )
-  end
-
-  def emit_trade(symbol, notional, result) do
-    :telemetry.execute([:latency_arbitrage_bot, :trade, result],
-      %{notional: notional},
-      %{symbol: symbol}
-    )
-  end
-
   @impl true
-  def init(_) do
-    # Attach handlers for metrics export
-    :telemetry.attach_many(
-      "telemetry-exporter",
-      [[:latency_arbitrage_bot, :edge, :_],
-       [:latency_arbitrage_bot, :trade, :_]],
-      &__MODULE__.handle_event/4,
-      []
-    )
-    {:ok, %{}}
-  end
-
+  def init(_), do: {:ok, %{metrics: %{}}}
   @impl true
-  def handle_event(_event, measurements, metadata, _config) do
-    # Log to console in dev; in prod ship to Loki / Datadog
-    Logger.info("[TELEMETRY] #{inspect(measurements)} #{inspect(metadata)}")
+  def handle_cast({:edge, data}, state) do
+    key = {:edge, data.symbol, data.venue_a, data.venue_b}
+    metrics = Map.update(state.metrics, key, 1, & &1)
+    {:noreply, %{state | metrics: metrics}}
   end
+  @impl true
+  def handle_cast({:latency, venue, ms}, state) do
+    metrics = Map.update(state.metrics, {:latency, venue}, [ms], &[ms | &1])
+    {:noreply, %{state | metrics: metrics}}
+  end
+  @impl true
+  def handle_cast({:signal, dir, pct}, state) do
+    metrics = Map.update(state.metrics, {:signal, dir}, [pct], &[pct | &1])
+    {:noreply, %{state | metrics: metrics}}
+  end
+  def metrics(pid), do: GenServer.call(pid, :metrics)
+  @impl true
+  def handle_call(:metrics, _from, state), do: {:reply, state.metrics, state}
 end

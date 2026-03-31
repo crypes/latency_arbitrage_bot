@@ -4,7 +4,6 @@ defmodule LatencyArbitrageBot.Support.Endpoint do
 
   plug Plug.Logger
   plug :match
-  plug Plug.CORS
   plug Plug.Parsers, parsers: [:json], pass: ["*/*"], json_decoder: Jason
   plug :dispatch
 

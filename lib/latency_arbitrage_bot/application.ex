@@ -7,20 +7,22 @@ defmodule LatencyArbitrageBot.Application do
 
   def start(_type, _args) do
     children = [
-      # Telemetry aggregator
+      # ── Core data pipeline ──────────────────────────────────────────────
       LatencyArbitrageBot.Support.Telemetry,
-      # Price oracle — fan-out to all subscribed venues
       LatencyArbitrageBot.Data.PriceOracle,
-      # Edge engine — heartbeat of the strategy
       LatencyArbitrageBot.Data.EdgeEngine,
-      # Risk manager — global position and exposure limits
       LatencyArbitrageBot.Data.RiskManager,
-      # Polymarket venue adapter (WebSocket + REST CLOB)
-      {LatencyArbitrageBot.Venues.Polymarket.Adapter, []},
-      # Venue supervisor registries
-      LatencyArbitrageBot.Venues.Supervisor,
-      # HTTP endpoint for health / metrics
-      {Bandit, plug: LatencyArbitrageBot.Support.Endpoint, port: 4000}
+
+      # ── Venue adapters ─────────────────────────────────────────────────
+      # Polymarket: WebSocket (CLOB) + REST (orders)
+      LatencyArbitrageBot.Venues.Polymarket.Adapter,
+
+      # Kalshi: REST (orders + market data) + WebSocket (live orderbook)
+      # Start only if :kalshi_api_key is configured
+      {LatencyArbitrageBot.Venues.Kalshi.Adapter, []},
+
+      # ── HTTP health / metrics endpoint (Plug) ──────────────────────────
+      {Plug.Cowboy, scheme: :http, plug: LatencyArbitrageBot.Support.Endpoint, options: [port: 4000]}
     ]
 
     opts = [strategy: :one_for_one, name: LatencyArbitrageBot.Supervisor]

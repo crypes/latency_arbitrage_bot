@@ -1,0 +1,4 @@
+
+# ── Secrets (never commit) ───────────────────────────────────────────────────
+config/secrets.exs
+config/kalshi_private_key.pem

@@ -1,67 +1,87 @@
-import time, httpx
-from .signer import KalshiSigner
+"""Kalshi adapter using httpx with a 10-calls/sec rate limiter."""
 
-BASE_URL = "https://api.elections.kalshi.com/trade-api"
+import asyncio, time, base64
+import httpx
+from latency_arbitrage.rate_limiter import RateLimiter
+from latency_arbitrage.config import KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_PEM, get_base_url
 
+def _sign(method, path, key_id, private_key_pem):
+    from cryptography.hazmat.primitives import serialization, hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.backends import default_backend
+    ts = str(int(time.time()))
+    pk = serialization.load_pem_private_key(
+        private_key_pem.encode(), password=None, backend=default_backend())
+    msg = f"{key_id}{ts}{method.upper()}{path}".encode()
+    sig = pk.sign(msg, padding.PKCS1v15(), hashes.SHA256())
+    return {
+        "KALSHI-KEY-ID": key_id,
+        "KALSHI-TIMESTAMP": ts,
+        "KALSHI-SIGNATURE": base64.b64encode(sig).decode(),
+        "Content-Type": "application/json",
+    }, ts
+
+class RateLimitedHTTP:
+    _client = None
+
+    def __init__(self, calls_per_second=10.0):
+        self._limiter = RateLimiter(calls_per_second)
+
+    async def request(self, method, url, **kwargs):
+        await self._limiter.acquire()
+        if RateLimitedHTTP._client is None:
+            RateLimitedHTTP._client = httpx.AsyncClient(http2=True, timeout=10.0)
+        return await RateLimitedHTTP._client.request(method, url, **kwargs)
 
 class KalshiAdapter:
-    def __init__(self, key_id: str, private_key_path: str, target_series: str = "KXBTC15M"):
-        self.key_id = key_id
-        self.signer = KalshiSigner(key_id, private_key_path)
-        self.target_series = target_series
-        self.base_url = BASE_URL
-        self._http: httpx.AsyncClient = None
+    RATE = 10  # calls per second
 
-    async def _ensure_http(self):
-        if self._http is None:
-            self._http = httpx.AsyncClient(base_url=self.base_url, timeout=10.0, http2=False)
+    def __init__(self, env="prod"):
+        self.key_id = KALSHI_KEY_ID
+        self.private_key_pem = KALSHI_PRIVATE_KEY_PEM
+        self.base_url = get_base_url(env)
+        self.http = RateLimitedHTTP(self.RATE)
 
-    async def _get(self, path: str, params: dict = None) -> dict:
-        await self._ensure_http()
-        headers = self.signer.sign_headers("GET", path, "", time.time())
-        resp = await self._http.get(path + ("?" + "&".join(f"{k}={v}" for k,v in (params or {}).items()) if params else ""), headers=headers)
+    def _headers(self, path):
+        h, _ = _sign("GET", path, self.key_id, self.private_key_pem)
+        return h
+
+    async def _get(self, path):
+        url = f"{self.base_url}{path}"
+        resp = await self.http.request("GET", url, headers=self._headers(path))
         resp.raise_for_status()
         return resp.json()
 
-    # ── Market data ────────────────────────────────────────────────
-
-    async def list_markets(self, status: str = None, limit: int = 20) -> list:
-        params = {"series_ticker": self.target_series, "limit": limit}
+    async def list_markets(self, series_ticker="KXBTC15M", status=None, limit=20):
+        path = f"/trade-api/v2/markets?series_ticker={series_ticker}&limit={limit}"
         if status:
-            params["status"] = status
-        data = await self._get("/v2/markets", params)
-        return data.get("markets", [])
+            path += f"&status={status}"
+        return (await self._get(path)).get("markets", [])
 
-    async def get_market(self, ticker: str) -> dict:
-        data = await self._get(f"/v2/markets/{ticker}")
-        return data.get("market", {})
+    async def get_series(self, series_ticker):
+        return await self._get(f"/trade-api/v2/series/{series_ticker}")
 
-    async def get_orderbook(self, ticker: str) -> dict:
-        data = await self._get(f"/v2/markets/{ticker}/orderbook")
-        return data.get("orderbook_fp", {})
+    async def get_market_orderbook(self, market_ticker):
+        return await self._get(f"/trade-api/v2/markets/{market_ticker}/orderbook")
 
-    async def get_series(self) -> dict:
-        data = await self._get(f"/v2/series/{self.target_series}")
-        return data.get("series", {})
+    async def get_balance(self):
+        return await self._get("/trade-api/v2/portfolio/balance")
 
-    # ── Execution ──────────────────────────────────────────────────
-
-    async def place_order(self, ticker: str, side: str, yes_bid: float, amount: int) -> dict:
-        await self._ensure_http()
-        path = f"/v2/markets/{ticker}/orders"
-        body = {"side": side, "yes_bid": yes_bid, "amount": amount}
-        headers = self.signer.sign_headers("POST", path, str(body), time.time())
-        resp = await self._http.post(path, headers=headers, json=body)
+    async def place_order(self, market_ticker, side, price):
+        path = "/trade-api/v2/orders"
+        headers, _ = _sign("POST", path, self.key_id, self.private_key_pem)
+        body = {"market_ticker": market_ticker, "side": side,
+                "type": "limit", "price": price, "count": 1}
+        url = f"{self.base_url}{path}"
+        resp = await self.http.request("POST", url, headers=headers, json=body)
         resp.raise_for_status()
         return resp.json()
 
-    async def get_positions(self) -> list:
-        data = await self._get("/v2/portfolio/positions")
-        return data.get("positions", [])
+    async def get_fills(self, market_ticker=None, limit=50):
+        params = f"?limit={limit}"
+        if market_ticker:
+            params += f"&market_ticker={market_ticker}"
+        return (await self._get(f"/trade-api/v2/fills{params}")).get("fills", [])
 
-    # ── Lifecycle ──────────────────────────────────────────────────
-
-    async def close(self):
-        if self._http:
-            await self._http.aclose()
-            self._http = None
+def create(env="prod"):
+    return KalshiAdapter(env=env)

@@ -20,9 +20,9 @@ defmodule LatencyArbitrageBot.MixProject do
 
   defp deps do
     [
+      {:websockex, "~> 0.4.3"},
       {:jason, "~> 1.4"},
       {:decimal, "~> 2.0"},
-      {:websockex, "~> 0.4.3"},
       {:uuid, "~> 1.1"},
       {:plug, "~> 1.15"},
       {:plug_cowboy, "~> 2.6"},

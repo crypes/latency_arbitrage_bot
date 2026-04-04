@@ -1,3 +1,4 @@
 **/__pycache__/
 *.pyc
 .env
+config/kalshi_demo_private_key.pem

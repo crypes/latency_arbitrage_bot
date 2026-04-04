@@ -1,8 +1,23 @@
-import os, base64
-from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+"""Application configuration - loaded from environment."""
+import os
 
-KALSHI_KEY_ID = os.environ.get("KALSHI_KEY_ID", "")
-_b64 = os.environ.get("KALSHI_PRIVATE_KEY_B64", "")
-KALSHI_PRIVATE_KEY_PEM = base64.b64decode(_b64).decode() if _b64 else ""
-BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
+def load_config():
+    """Load all config from environment variables."""
+    return {
+        # Mode
+        "mode": os.getenv("APP_MODE", "dry_run"),  # dry_run | live
+
+        # Logging
+        "log_level": os.getenv("LOG_LEVEL", "INFO"),
+
+        # Risk
+        "max_position_size": float(os.getenv("MAX_POSITION_SIZE", "50.0")),
+        "max_daily_loss": float(os.getenv("MAX_DAILY_LOSS", "25.0")),
+        "bankroll": float(os.getenv("BANKROLL", "500.0")),
+
+        # Edge engine
+        "min_edge_bps": float(os.getenv("MIN_EDGE_BPS", "50.0")),
+
+        # Rate limiting
+        "max_rps": float(os.getenv("MAX_RPS", "5.0")),
+    }

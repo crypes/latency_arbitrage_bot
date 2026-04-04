@@ -1,60 +1,30 @@
-# Latency Arbitrage Bot — Python Edition
-
-Async Python rewrite of the multi-venue latency arbitrage engine for prediction markets.
-
-## Architecture
-
-```
-latency_arbitrage/
-  config.py          # Env var config + validation
-  data/
-    price_oracle.py   # Unified price feed (all venues)
-    edge_engine.py    # Spread + momentum signal detection
-    risk_manager.py   # Position sizing + circuit breakers
-  venues/
-    kalshi/
-      adapter.py     # Kalshi REST + WS adapter (production)
-      signer.py       # RSA-256 SHA-256 request signer
-    polymarket/
-      adapter.py     # Polymarket CLOB REST + WebSocket adapter
-    coinbase/         # Coinbase Predictions (stub — not yet active)
-  execution/
-    order_executor.py  # Venue-agnostic async order placer
-  cli.py             # CLI entry point
-```
-
-## Status
-
-| Venue         | API Access | Live Data | Notes                                         |
-|---------------|-----------|-----------|-----------------------------------------------|
-| Kalshi Demo   | ✅        | ✅        | `demo-api.kalshi.com` — synthetic markets    |
-| Kalshi Prod   | ✅        | ✅        | `KXBTC15M` series found, markets `initialized` |
-| Polymarket    | ⚠️        | ⚠️        | Needs CLOB credentials                       |
-| Coinbase      | 🔜       | 🔜       | Not yet available                            |
+# Latency Arbitrage Bot – Python
 
 ## Quick Start
 
 ```bash
-# Install deps
-pip install httpx websockets python-dotenv cryptography
-
-# Configure (copy and fill in)
-cp .env.example .env
-
-# Run
-python -m latency_arbitrage
+cd python
+cp .env.example .env          # add your API keys
+pip install -r requirements.txt
+python main.py               # demo mode (market data only)
 ```
 
-## API Base URLs
+## Demo vs Production
 
-- **Kalshi Demo:** `https://demo-api.kalshi.com`
-- **Kalshi Production:** `https://api.elections.kalshi.com`
-- **Polymarket:** `https://clob.polymarket.com`
+| Feature | Demo | Production |
+|---------|------|------------|
+| Market data | ✅ | ✅ |
+| Order placement | ❌ | ✅ |
+| Balance | ❌ | ✅ |
 
-## Key Findings (Phase 1)
+## Key Files
 
-- KXBTC15M series confirmed active in production
-- All BTC markets are in `initialized` status (awaiting open)
-- Read-only key cannot place orders (write key required for trading)
-- Polymarket 8% dynamic taker fees as of March 2026
-- No Coinbase Predictions markets detected yet
+- `venues/kalshi.py` – Production venue (requires R/W API key)
+- `venues/demo.py`  – Demo venue (market data only)
+- `config/__init__.py` – Shared rate-limiter + signer
+
+## Adding Venues
+
+1. Create `venues/<name>.py` with `Venue` class
+2. Add to `venues/__init__.py`
+3. Update `main.py` import
